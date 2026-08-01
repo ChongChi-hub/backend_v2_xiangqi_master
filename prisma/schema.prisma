@@ -1,0 +1,109 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
+// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  PLAYER
+  ADMIN
+}
+
+enum MatchStatus {
+  PLAYING
+  FINISHED
+  DRAW
+  ABORTED
+}
+
+model User {
+  id            String   @id @default(uuid())
+  username      String   @unique
+  email         String   @unique
+  passwordHash  String   @map("password_hash")
+  eloScore      Int      @default(1200) @map("elo_score")
+  winMatches    Int      @default(0) @map("win_matches")
+  loseMatches   Int      @default(0) @map("lose_matches")
+  drawMatches   Int      @default(0) @map("draw_matches")
+  role          Role     @default(PLAYER)
+  
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+
+  // Relations
+  hostedRooms   Room[]   @relation("HostRooms")
+  redMatches    Match[]  @relation("RedPlayerMatches")
+  blackMatches  Match[]  @relation("BlackPlayerMatches")
+  wonMatches    Match[]  @relation("WinnerMatches")
+  moves         Move[]
+
+  @@map("users")
+}
+
+model Match {
+  id            String      @id @default(uuid())
+  
+  redPlayerId   String      @map("red_player_id")
+  blackPlayerId String      @map("black_player_id")
+  winnerId      String?     @map("winner_id")
+  
+  status        MatchStatus @default(PLAYING)
+  timeControl   Int         @map("time_control") // in seconds
+  initialFen    String      @map("initial_fen")
+  
+  createdAt     DateTime    @default(now()) @map("created_at")
+  endedAt       DateTime?   @map("ended_at")
+
+  // Relations
+  redPlayer     User        @relation("RedPlayerMatches", fields: [redPlayerId], references: [id])
+  blackPlayer   User        @relation("BlackPlayerMatches", fields: [blackPlayerId], references: [id])
+  winner        User?       @relation("WinnerMatches", fields: [winnerId], references: [id])
+  moves         Move[]
+
+  @@map("matches")
+}
+
+model Move {
+  id            String   @id @default(uuid())
+  matchId       String   @map("match_id")
+  playerId      String   @map("player_id")
+  
+  moveNumber    Int      @map("move_number")
+  moveStr       String   @map("move_str") // e.g. "h2e2"
+  fen           String   // Board state after move
+  timeCost      Int      @map("time_cost") // in milliseconds
+  
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  // Relations
+  match         Match    @relation(fields: [matchId], references: [id])
+  player        User     @relation(fields: [playerId], references: [id])
+
+  @@map("moves")
+}
+
+model Room {
+  id            String   @id @default(uuid())
+  roomCode      String   @unique @map("room_code")
+  hostId        String   @map("host_id")
+  
+  isPrivate     Boolean  @default(false) @map("is_private")
+  password      String?  
+  timeControl   Int      @map("time_control") // in seconds
+  
+  createdAt     DateTime @default(now()) @map("created_at")
+  
+  // Relations
+  host          User     @relation("HostRooms", fields: [hostId], references: [id])
+
+  @@map("rooms")
+}
