@@ -21,7 +21,7 @@ export const getUserProfile = async (req: AuthRequest, res: Response): Promise<v
         winMatches: true,
         loseMatches: true,
         drawMatches: true,
-      }
+      },
     });
 
     if (!user) {
@@ -41,7 +41,7 @@ export const getUserProfile = async (req: AuthRequest, res: Response): Promise<v
       loseMatches: user.loseMatches,
       drawMatches: user.drawMatches,
       totalMatches,
-      winRate: Math.round(winRate * 100) / 100
+      winRate: Math.round(winRate * 100) / 100,
     });
   } catch (error) {
     console.error('Get profile error:', error);
@@ -67,21 +67,21 @@ export const getLeaderboard = async (req: Request, res: Response): Promise<void>
           winMatches: true,
           loseMatches: true,
           drawMatches: true,
-        }
+        },
       }),
-      prisma.user.count()
+      prisma.user.count(),
     ]);
 
     const data = users.map((user, index) => {
       const totalMatches = user.winMatches + user.loseMatches + user.drawMatches;
       const winRate = totalMatches > 0 ? (user.winMatches / totalMatches) * 100 : 0;
-      
+
       return {
         rank: skip + index + 1,
         userId: user.id,
         username: user.username,
         eloScore: user.eloScore,
-        winRate: Math.round(winRate * 100) / 100
+        winRate: Math.round(winRate * 100) / 100,
       };
     });
 
@@ -89,7 +89,7 @@ export const getLeaderboard = async (req: Request, res: Response): Promise<void>
       data,
       total,
       page,
-      totalPages: Math.ceil(total / limit)
+      totalPages: Math.ceil(total / limit),
     });
   } catch (error) {
     console.error('Get leaderboard error:', error);
@@ -101,7 +101,7 @@ export const savePveMatch = async (req: AuthRequest, res: Response): Promise<voi
   try {
     const userId = req.user?.userId;
     const { difficulty, result, playerSide, clientMatchId, timeControl, initialFen } = req.body;
-    
+
     if (!userId) {
       res.status(401).json({ error: 'Không có quyền truy cập' });
       return;
@@ -112,18 +112,8 @@ export const savePveMatch = async (req: AuthRequest, res: Response): Promise<voi
       return;
     }
 
-    // Determine ELO reward
-    let reward = 0;
-    if (result === 'win') {
-      switch (difficulty) {
-        case 'beginner': reward = 10; break;
-        case 'apprentice': reward = 20; break;
-        case 'intermediate': reward = 30; break;
-        case 'master': reward = 40; break;
-        case 'grandmaster': reward = 50; break;
-        default: reward = 10;
-      }
-    }
+    // PVE matches do NOT award or deduct ELO points
+    const reward = 0;
 
     // Ensure AI user exists
     let aiUser = await prisma.user.findUnique({ where: { username: 'Pikafish_AI' } });
@@ -134,7 +124,7 @@ export const savePveMatch = async (req: AuthRequest, res: Response): Promise<voi
           email: 'ai@pikafish.local',
           passwordHash: 'dummy_hash',
           eloScore: 2800,
-        }
+        },
       });
     }
 
@@ -148,7 +138,7 @@ export const savePveMatch = async (req: AuthRequest, res: Response): Promise<voi
     const isRed = playerSide === 'red';
     const winnerId = result === 'win' ? userId : result === 'lose' ? aiUser.id : null;
 
-    // Save match
+    // Save match record without altering ELO
     await prisma.$transaction(async (tx) => {
       await tx.match.create({
         data: {
@@ -160,35 +150,28 @@ export const savePveMatch = async (req: AuthRequest, res: Response): Promise<voi
           timeControl: timeControl || 0,
           initialFen: initialFen || 'startpos',
           endedAt: new Date(),
-        }
+        },
       });
 
-      if (reward > 0) {
+      if (result === 'win') {
         await tx.user.update({
           where: { id: userId },
-          data: {
-            eloScore: { increment: reward },
-            winMatches: { increment: 1 }
-          }
+          data: { winMatches: { increment: 1 } },
         });
       } else if (result === 'lose') {
         await tx.user.update({
           where: { id: userId },
-          data: {
-            loseMatches: { increment: 1 }
-          }
+          data: { loseMatches: { increment: 1 } },
         });
       } else if (result === 'draw') {
         await tx.user.update({
           where: { id: userId },
-          data: {
-            drawMatches: { increment: 1 }
-          }
+          data: { drawMatches: { increment: 1 } },
         });
       }
     });
 
-    res.status(200).json({ message: 'Lưu trận đấu thành công', reward });
+    res.status(200).json({ message: 'Lưu trận đấu thành công (Không thay đổi ELO PVE)', reward: 0 });
   } catch (error) {
     console.error('Save PVE match error:', error);
     res.status(500).json({ error: 'Lỗi máy chủ nội bộ' });
