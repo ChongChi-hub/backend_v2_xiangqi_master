@@ -21,6 +21,7 @@ export const getUserProfile = async (req: AuthRequest, res: Response): Promise<v
         winMatches: true,
         loseMatches: true,
         drawMatches: true,
+        avatarUrl: true,
       },
     });
 
@@ -40,6 +41,7 @@ export const getUserProfile = async (req: AuthRequest, res: Response): Promise<v
       winMatches: user.winMatches,
       loseMatches: user.loseMatches,
       drawMatches: user.drawMatches,
+      avatarUrl: user.avatarUrl,
       totalMatches,
       winRate: Math.round(winRate * 100) / 100,
     });
@@ -174,6 +176,33 @@ export const savePveMatch = async (req: AuthRequest, res: Response): Promise<voi
     res.status(200).json({ message: 'Lưu trận đấu thành công (Không thay đổi ELO PVE)', reward: 0 });
   } catch (error) {
     console.error('Save PVE match error:', error);
+    res.status(500).json({ error: 'Lỗi máy chủ nội bộ' });
+  }
+};
+
+export const uploadAvatar = async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const userId = req.user?.userId;
+    if (!userId) {
+      res.status(401).json({ error: 'Không có quyền truy cập' });
+      return;
+    }
+
+    if (!req.file) {
+      res.status(400).json({ error: 'Không có file được tải lên' });
+      return;
+    }
+
+    const avatarUrl = req.file.path; // Multer-storage-cloudinary returns the URL in path
+
+    await prisma.user.update({
+      where: { id: userId },
+      data: { avatarUrl },
+    });
+
+    res.status(200).json({ message: 'Cập nhật ảnh đại diện thành công', avatarUrl });
+  } catch (error) {
+    console.error('Upload avatar error:', error);
     res.status(500).json({ error: 'Lỗi máy chủ nội bộ' });
   }
 };

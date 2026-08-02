@@ -35,6 +35,7 @@ model User {
   loseMatches   Int      @default(0) @map("lose_matches")
   drawMatches   Int      @default(0) @map("draw_matches")
   role          Role     @default(PLAYER)
+  avatarUrl     String?  @map("avatar_url")
   
   createdAt     DateTime @default(now()) @map("created_at")
   updatedAt     DateTime @updatedAt @map("updated_at")
