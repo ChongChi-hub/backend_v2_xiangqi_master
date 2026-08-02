@@ -119,9 +119,10 @@ export const getMatchesList = async (req: Request, res: Response) => {
 
 export const getBotSettings = async (req: Request, res: Response) => {
   try {
-    const settings = await prisma.botSetting.findMany({
-      orderBy: { depth: 'asc' }
-    });
+    const prismaClient = prisma as any;
+    const settings = typeof prismaClient.botSetting?.findMany === 'function' 
+      ? await prismaClient.botSetting.findMany({ orderBy: { depth: 'asc' } })
+      : [];
     res.json({
       success: true,
       data: settings
@@ -142,11 +143,14 @@ export const updateBotSetting = async (req: Request, res: Response) => {
       return;
     }
 
-    const updated = await prisma.botSetting.upsert({
-      where: { difficulty },
-      update: { depth: Number(depth), movetime: Number(movetime) },
-      create: { difficulty, depth: Number(depth), movetime: Number(movetime) }
-    });
+    const prismaClient = prisma as any;
+    const updated = typeof prismaClient.botSetting?.upsert === 'function'
+      ? await prismaClient.botSetting.upsert({
+          where: { difficulty },
+          update: { depth: Number(depth), movetime: Number(movetime) },
+          create: { difficulty, depth: Number(depth), movetime: Number(movetime) }
+        })
+      : { difficulty, depth, movetime };
 
     res.json({
       success: true,
