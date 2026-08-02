@@ -14,6 +14,7 @@ export const getDashboardStats = async (_req: Request, res: Response) => {
     const activeRooms = privateRooms.size;
 
     const topPlayers = await prisma.user.findMany({
+      where: { role: 'PLAYER' },
       orderBy: { eloScore: 'desc' },
       take: 5,
       select: {

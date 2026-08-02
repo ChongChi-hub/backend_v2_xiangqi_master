@@ -59,6 +59,7 @@ export const getLeaderboard = async (req: Request, res: Response): Promise<void>
 
     const [users, total] = await Promise.all([
       prisma.user.findMany({
+        where: { role: 'PLAYER' },
         orderBy: { eloScore: 'desc' },
         skip,
         take: limit,
@@ -71,7 +72,7 @@ export const getLeaderboard = async (req: Request, res: Response): Promise<void>
           drawMatches: true,
         },
       }),
-      prisma.user.count(),
+      prisma.user.count({ where: { role: 'PLAYER' } }),
     ]);
 
     const data = users.map((user, index) => {
