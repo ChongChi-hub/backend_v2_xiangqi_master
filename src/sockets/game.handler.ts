@@ -120,6 +120,125 @@ export const handleGameEvents = (io: Server, socket: Socket) => {
       console.error('Error handling resign:', error);
     }
   });
+
+  socket.on('game_ended', async (data: { matchId: string; gameState: string }) => {
+    try {
+      const match = await prisma.match.findUnique({ where: { id: data.matchId } });
+      if (!match || match.status !== 'PLAYING') return;
+
+      const isWinner = data.gameState === 'CHECKMATE' || data.gameState === 'KING_CAPTURED';
+      
+      // If it's a draw/stalemate, we can handle it differently, but for now we assume Checkmate logic
+      if (data.gameState === 'STALEMATE') {
+        await prisma.match.update({
+          where: { id: data.matchId },
+          data: {
+            status: 'FINISHED',
+            winnerId: null,
+            endedAt: new Date(),
+          },
+        });
+
+        // Increment drawMatches for both
+        await prisma.user.update({
+          where: { id: match.redPlayerId },
+          data: { drawMatches: { increment: 1 } },
+        });
+        await prisma.user.update({
+          where: { id: match.blackPlayerId },
+          data: { drawMatches: { increment: 1 } },
+        });
+
+        const roomId = `match_${data.matchId}`;
+        io.to(roomId).emit('match_ended', { winnerId: null, reason: 'stalemate' });
+        return;
+      }
+
+      if (isWinner) {
+        const winnerId = userId;
+        const loserId = match.redPlayerId === userId ? match.blackPlayerId : match.redPlayerId;
+
+        await prisma.match.update({
+          where: { id: data.matchId },
+          data: {
+            status: 'FINISHED',
+            winnerId,
+            endedAt: new Date(),
+          },
+        });
+
+        await prisma.user.update({
+          where: { id: winnerId },
+          data: {
+            eloScore: { increment: 30 },
+            winMatches: { increment: 1 },
+          },
+        });
+
+        await prisma.user.update({
+          where: { id: loserId },
+          data: {
+            eloScore: { decrement: 30 },
+            loseMatches: { increment: 1 },
+          },
+        });
+
+        const roomId = `match_${data.matchId}`;
+        io.to(roomId).emit('match_ended', { winnerId, reason: 'checkmate' });
+      }
+    } catch (error) {
+      console.error('Error handling game_ended:', error);
+    }
+  });
+
+  socket.on('offer_draw', async (data: { matchId: string }) => {
+    try {
+      const roomId = `match_${data.matchId}`;
+      socket.to(roomId).emit('draw_offered', { offeredBy: userId });
+    } catch (error) {
+      console.error('Error handling offer_draw:', error);
+    }
+  });
+
+  socket.on('respond_draw', async (data: { matchId: string; accept: boolean }) => {
+    try {
+      const roomId = `match_${data.matchId}`;
+      
+      if (!data.accept) {
+        socket.to(roomId).emit('draw_declined', { declinedBy: userId });
+        return;
+      }
+
+      // Draw Accepted
+      const match = await prisma.match.findUnique({ where: { id: data.matchId } });
+      if (!match || match.status !== 'PLAYING') return;
+
+      await prisma.match.update({
+        where: { id: data.matchId },
+        data: {
+          status: 'FINISHED',
+          winnerId: null,
+          endedAt: new Date(),
+        },
+      });
+
+      // Update both players' draw statistics (no ELO change)
+      await prisma.user.update({
+        where: { id: match.redPlayerId },
+        data: { drawMatches: { increment: 1 } },
+      });
+      await prisma.user.update({
+        where: { id: match.blackPlayerId },
+        data: { drawMatches: { increment: 1 } },
+      });
+
+      // Broadcast draw accepted to both players
+      io.to(roomId).emit('match_ended', { winnerId: null, reason: 'draw_agreed' });
+
+    } catch (error) {
+      console.error('Error handling respond_draw:', error);
+    }
+  });
 };
 
 export const handlePlayerDisconnect = async (io: Server, userId: string) => {
