@@ -108,7 +108,7 @@ export const getLeaderboard = async (req: Request, res: Response): Promise<void>
 export const savePveMatch = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
     const userId = req.user?.userId;
-    const { difficulty, result, playerSide, clientMatchId, timeControl, initialFen } = req.body;
+    const { difficulty, result, playerSide, clientMatchId, timeControl, initialFen, moves } = req.body;
 
     if (!userId) {
       res.status(401).json({ error: 'Không có quyền truy cập' });
@@ -146,6 +146,19 @@ export const savePveMatch = async (req: AuthRequest, res: Response): Promise<voi
     const isRed = playerSide === 'red';
     const winnerId = result === 'win' ? userId : result === 'lose' ? aiUser.id : null;
 
+    const moveData = moves && Array.isArray(moves) ? moves.map((mStr, idx) => {
+      // Approximate whose turn it is by alternating
+      const isRedTurn = idx % 2 === 0;
+      const movePlayerId = isRedTurn ? (isRed ? userId : aiUser.id) : (isRed ? aiUser.id : userId);
+      return {
+        playerId: movePlayerId,
+        moveNumber: idx + 1,
+        moveStr: mStr,
+        fen: '', // We don't have fen for each move from frontend array easily, so leave empty or dummy
+        timeCost: 0,
+      };
+    }) : [];
+
     // Save match record without altering ELO
     await prisma.$transaction(async (tx) => {
       await tx.match.create({
@@ -158,6 +171,9 @@ export const savePveMatch = async (req: AuthRequest, res: Response): Promise<voi
           timeControl: timeControl || 0,
           initialFen: initialFen || 'startpos',
           endedAt: new Date(),
+          moves: moveData.length > 0 ? {
+            create: moveData
+          } : undefined,
         },
       });
 
