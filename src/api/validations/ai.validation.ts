@@ -1,8 +1,6 @@
 import { z } from 'zod';
 
-// Cờ Tướng (Xiangqi) FEN notation cơ bản: bắt đầu bằng phần bố trí quân cờ
 const FEN_REGEX = /^[a-zA-Z0-9\/\s\+\-]+$/;
-// Định dạng nước đi Cờ Tướng: 4 ký tự số vd: "a0b1" hoặc "h2e2"
 const MOVE_REGEX = /^[a-i][0-9][a-i][0-9]$/;
 
 export const aiValidation = {
@@ -12,7 +10,8 @@ export const aiValidation = {
         .string()
         .min(1, 'Chuỗi FEN không được để trống')
         .max(200, 'Chuỗi FEN không hợp lệ (quá dài)')
-        .regex(FEN_REGEX, 'Chuỗi FEN chứa ký tự không hợp lệ')
+        .regex(FEN_REGEX, 'Chuỗi FEN chứa ký tự không hợp lệ'),
+      difficulty: z.string().optional()
     })
   }),
 
@@ -28,7 +27,8 @@ export const aiValidation = {
         .min(4, 'Nước đi phải đủ 4 ký tự (ví dụ: h2e2)')
         .max(4, 'Nước đi không được dài hơn 4 ký tự')
         .regex(MOVE_REGEX, 'Nước đi không đúng định dạng (ví dụ hợp lệ: h2e2, a0b1)')
+        .optional(),
+      difficulty: z.string().optional()
     })
   })
 };
-

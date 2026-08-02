@@ -3,15 +3,16 @@ import * as aiService from '../../services/ai.service';
 
 export const getAIMove = async (req: Request, res: Response): Promise<void> => {
   try {
-    const { fen } = req.body;
+    const { fen, difficulty } = req.body;
 
-    const result = await aiService.calculateBestMove(fen);
+    const result = await aiService.calculateBestMove(fen, difficulty);
     
     res.status(200).json({
       bestMove: result.bestMove,
       evaluationScore: result.score,
       newFen: result.newFen,
-      nodesVisited: 15000 // Mock data
+      nodesVisited: result.nodesVisited || 15000,
+      depth: result.depth || 4
     });
   } catch (error) {
     console.error('AI Move Error:', error);
@@ -21,9 +22,9 @@ export const getAIMove = async (req: Request, res: Response): Promise<void> => {
 
 export const getAIHint = async (req: Request, res: Response): Promise<void> => {
   try {
-    const { fen } = req.body;
+    const { fen, difficulty } = req.body;
 
-    const result = await aiService.getHint(fen);
+    const result = await aiService.getHint(fen, difficulty);
 
     res.status(200).json({
       suggestedMove: result.suggestedMove,
