@@ -23,6 +23,7 @@ initSockets(io);
 import authRoutes from './api/routes/auth.routes';
 import userRoutes from './api/routes/user.routes';
 import aiRoutes from './api/routes/ai.routes';
+import adminRoutes from './api/routes/admin.routes';
 
 app.use(cors());
 app.use(express.json());
@@ -31,6 +32,7 @@ app.use(express.json());
 app.use('/api/v1/auth', authRoutes);
 app.use('/api/v1/users', userRoutes);
 app.use('/api/v1/engine', aiRoutes);
+app.use('/api/v1/admin', adminRoutes);
 
 app.get('/api/health', (req: Request, res: Response) => {
   res.json({ status: 'ok', message: 'Xiangqi Backend is running' });

@@ -40,3 +40,10 @@ export const authenticateToken = (req: AuthRequest, res: Response, next: NextFun
   }
 };
 
+export const authorizeAdmin = (req: AuthRequest, res: Response, next: NextFunction): void => {
+  if (!req.user || req.user.role !== 'ADMIN') {
+    res.status(403).json({ error: 'Bị từ chối: Bạn không có quyền quản trị viên' });
+    return;
+  }
+  next();
+};
