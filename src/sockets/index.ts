@@ -1,6 +1,6 @@
 import { Server, Socket } from 'socket.io';
 import jwt from 'jsonwebtoken';
-import { handleRoomEvents } from './room.handler';
+import { handleRoomEvents, handlePrivateRoomDisconnect } from './room.handler';
 import { handleGameEvents, handlePlayerDisconnect } from './game.handler';
 
 // Store connected users mapping (socket.id -> userId)
@@ -43,6 +43,7 @@ export const initSockets = (io: Server) => {
       connectedUsers.delete(socket.id);
       console.log(`User ${userId} disconnected. Triggering active match cleanup...`);
       handlePlayerDisconnect(io, userId);
+      handlePrivateRoomDisconnect(io, userId);
     });
   });
 };
