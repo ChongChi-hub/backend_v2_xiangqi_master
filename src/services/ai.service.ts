@@ -197,8 +197,10 @@ export const calculateBestMove = async (
           if (parts[1]) {
             bestMove = parts[1];
           }
-          child.stdin.write('quit\n');
-          child.kill();
+          try {
+            child.stdin.write('quit\n');
+          } catch (e) {}
+          child.kill('SIGKILL');
           return resolve({
             bestMove,
             score,
@@ -219,10 +221,13 @@ export const calculateBestMove = async (
     setTimeout(() => {
       if (!resolved) {
         resolved = true;
-        child.kill();
+        try {
+          child.stdin.write('quit\n');
+        } catch (e) {}
+        child.kill('SIGKILL');
         resolve({ bestMove, score, depth: depthVisited, nodesVisited });
       }
-    }, movetime + 2000);
+    }, movetime + 3000);
   });
 };
 
