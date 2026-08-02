@@ -15,7 +15,6 @@ export interface PrivateRoom {
   guestUsername: string | null;
   settings: {
     totalRounds: number;
-    timeControl: number;
     hostSide: 'random' | 'red' | 'black';
   };
   state: {
@@ -33,6 +32,7 @@ export interface PrivateRoom {
     currentFen: string;
     turn: 'red' | 'black';
     drawOfferBy: string | null;
+    roundStartedAt: number | null;
   };
   createdAt: number;
 }
@@ -67,7 +67,7 @@ export const handleRoomEvents = (io: Server, socket: Socket) => {
 
   // --- Private Room Events ---
 
-  socket.on('create_private_room', async (settings: { totalRounds: number; timeControl: number; hostSide: 'random' | 'red' | 'black' }) => {
+  socket.on('create_private_room', async (settings: { totalRounds: number; hostSide: 'random' | 'red' | 'black' }) => {
     const code = generateRoomCode();
     
     // Fetch host username
@@ -91,6 +91,7 @@ export const handleRoomEvents = (io: Server, socket: Socket) => {
         currentFen: INITIAL_FEN,
         turn: 'red',
         drawOfferBy: null,
+        roundStartedAt: null,
       },
       createdAt: Date.now(),
     };
@@ -98,50 +99,59 @@ export const handleRoomEvents = (io: Server, socket: Socket) => {
     privateRooms.set(code, room);
     socket.join(`room_${code}`);
     console.log(`User ${userId} created private room ${code}`);
-    socket.emit('private_room_created', { roomCode: code });
+    io.to(`room_${code}`).emit('private_room_created', { roomCode: code });
     broadcastRoomState(io, code, room);
   });
 
   socket.on('join_private_room', async (data: { roomCode: string }) => {
     const room = privateRooms.get(data.roomCode);
     if (!room) {
-      socket.emit('private_room_error', { message: 'Phòng không tồn tại hoặc đã bị hủy.' });
+      socket.emit('private_room_error', { message: 'Phòng không tồn tại hoặc đã kết thúc.' });
       return;
     }
-
-    if (room.hostId === userId || room.guestId === userId) {
-      // Rejoin
+    
+    if (room.hostId === userId) {
+      // Host rejoining
       socket.join(`room_${data.roomCode}`);
-      socket.emit('private_room_joined', { roomCode: data.roomCode });
       broadcastRoomState(io, data.roomCode, room);
       return;
     }
 
-    if (room.state.status !== 'WAITING' || room.guestId !== null) {
-      socket.emit('private_room_error', { message: 'Phòng đã đầy hoặc đã bắt đầu.' });
+    if (room.guestId && room.guestId !== userId) {
+      socket.emit('private_room_error', { message: 'Phòng đã đủ người.' });
       return;
     }
 
-    // Assign guest
+    // New guest joining
     const guestUser = await prisma.user.findUnique({ where: { id: userId }, select: { username: true } });
     room.guestId = userId;
     room.guestUsername = guestUser?.username || 'Kỳ Thủ Khách';
     
-    // Assign sides for first round
-    let hostAssignedSide = room.settings.hostSide;
-    if (hostAssignedSide === 'random') {
-      hostAssignedSide = Math.random() > 0.5 ? 'red' : 'black';
-    }
-    const guestAssignedSide = hostAssignedSide === 'red' ? 'black' : 'red';
-
-    room.state.hostAssignedSide = hostAssignedSide as 'red' | 'black';
-    room.state.guestAssignedSide = guestAssignedSide as 'red' | 'black';
-    room.state.status = 'PLAYING';
-    room.state.currentFen = INITIAL_FEN;
-    room.state.turn = 'red';
-
     socket.join(`room_${data.roomCode}`);
     console.log(`User ${userId} joined private room ${data.roomCode}`);
+    
+    // If it's the first time, auto-ready both and start round 1 logic
+    if (room.state.status === 'WAITING' && room.guestId) {
+      room.state.hostReady = true;
+      room.state.guestReady = true;
+      
+      // Assign sides
+      let redPlayerId = room.hostId;
+      if (room.settings.hostSide === 'random') {
+        redPlayerId = Math.random() > 0.5 ? room.hostId : room.guestId;
+      } else if (room.settings.hostSide === 'black') {
+        redPlayerId = room.guestId;
+      }
+      
+      room.state.hostAssignedSide = (redPlayerId === room.hostId) ? 'red' : 'black';
+      room.state.guestAssignedSide = (redPlayerId === room.guestId) ? 'red' : 'black';
+      
+      room.state.status = 'PLAYING';
+      room.state.roundStartedAt = Date.now();
+      room.state.currentFen = INITIAL_FEN;
+      room.state.turn = 'red';
+    }
+
     broadcastRoomState(io, data.roomCode, room);
   });
 
@@ -165,6 +175,16 @@ export const handleRoomEvents = (io: Server, socket: Socket) => {
           privateRooms.delete(data.roomCode);
           io.to(`room_${data.roomCode}`).emit('private_room_cancelled');
         } else if (room.state.status === 'PLAYING' || room.state.status === 'BETWEEN_ROUNDS') {
+          if (room.state.status === 'PLAYING' && room.guestId) {
+            const duration = Math.floor((Date.now() - (room.state.roundStartedAt || Date.now())) / 1000);
+            const redPlayerId = room.state.hostAssignedSide === 'red' ? room.hostId : room.guestId;
+            const blackPlayerId = room.state.hostAssignedSide === 'black' ? room.hostId : room.guestId;
+            prisma.match.create({
+              data: {
+                redPlayerId, blackPlayerId, winnerId: room.guestId, timeControl: duration, initialFen: INITIAL_FEN, status: 'FINISHED', endedAt: new Date()
+              }
+            }).catch(console.error);
+          }
           room.state.score.guest += room.settings.totalRounds; // Instantly win the series
           room.state.status = 'FINISHED';
           broadcastRoomState(io, data.roomCode, room);
@@ -176,6 +196,16 @@ export const handleRoomEvents = (io: Server, socket: Socket) => {
           io.to(`room_${data.roomCode}`).emit('private_room_guest_left');
           broadcastRoomState(io, data.roomCode, room);
         } else if (room.state.status === 'PLAYING' || room.state.status === 'BETWEEN_ROUNDS') {
+          if (room.state.status === 'PLAYING' && room.guestId) {
+            const duration = Math.floor((Date.now() - (room.state.roundStartedAt || Date.now())) / 1000);
+            const redPlayerId = room.state.hostAssignedSide === 'red' ? room.hostId : room.guestId;
+            const blackPlayerId = room.state.hostAssignedSide === 'black' ? room.hostId : room.guestId;
+            prisma.match.create({
+              data: {
+                redPlayerId, blackPlayerId, winnerId: room.hostId, timeControl: duration, initialFen: INITIAL_FEN, status: 'FINISHED', endedAt: new Date()
+              }
+            }).catch(console.error);
+          }
           room.state.score.host += room.settings.totalRounds; // Instantly win the series
           room.state.status = 'FINISHED';
           broadcastRoomState(io, data.roomCode, room);
@@ -198,15 +228,36 @@ export const handleRoomEvents = (io: Server, socket: Socket) => {
     }
   });
 
-  socket.on('private_game_ended', (data: { roomCode: string; winnerId: string | null }) => {
+  socket.on('private_game_ended', async (data: { roomCode: string; winnerId: string | null }) => {
     const room = privateRooms.get(data.roomCode);
-    if (room && room.state.status === 'PLAYING') {
+    if (room && room.state.status === 'PLAYING' && room.guestId) {
       if (data.winnerId === room.hostId) {
         room.state.score.host += 1;
       } else if (data.winnerId === room.guestId) {
         room.state.score.guest += 1;
       } else {
         room.state.score.draws += 1;
+      }
+
+      // Save match to DB
+      const duration = Math.floor((Date.now() - (room.state.roundStartedAt || Date.now())) / 1000);
+      const redPlayerId = room.state.hostAssignedSide === 'red' ? room.hostId : room.guestId;
+      const blackPlayerId = room.state.hostAssignedSide === 'black' ? room.hostId : room.guestId;
+      
+      try {
+        await prisma.match.create({
+          data: {
+            redPlayerId,
+            blackPlayerId,
+            winnerId: data.winnerId,
+            timeControl: duration, // Store actual duration in timeControl
+            initialFen: INITIAL_FEN,
+            status: data.winnerId ? 'FINISHED' : 'DRAW',
+            endedAt: new Date(),
+          }
+        });
+      } catch (err) {
+        console.error('Failed to save private match:', err);
       }
 
       const winsNeeded = Math.ceil(room.settings.totalRounds / 2);
@@ -230,13 +281,35 @@ export const handleRoomEvents = (io: Server, socket: Socket) => {
     }
   });
 
-  socket.on('respond_draw', (data: { roomCode: string; accept: boolean }) => {
+  socket.on('respond_draw', async (data: { roomCode: string; accept: boolean }) => {
     const room = privateRooms.get(data.roomCode);
-    if (room && room.state.status === 'PLAYING' && room.state.drawOfferBy && room.state.drawOfferBy !== userId) {
+    if (room && room.state.status === 'PLAYING' && room.state.drawOfferBy && room.state.drawOfferBy !== userId && room.guestId) {
       if (data.accept) {
         room.state.score.draws += 1;
+        
+        // Save match to DB as DRAW
+        const duration = Math.floor((Date.now() - (room.state.roundStartedAt || Date.now())) / 1000);
+        const redPlayerId = room.state.hostAssignedSide === 'red' ? room.hostId : room.guestId;
+        const blackPlayerId = room.state.hostAssignedSide === 'black' ? room.hostId : room.guestId;
+        
+        try {
+          await prisma.match.create({
+            data: {
+              redPlayerId,
+              blackPlayerId,
+              winnerId: null,
+              timeControl: duration,
+              initialFen: INITIAL_FEN,
+              status: 'DRAW',
+              endedAt: new Date(),
+            }
+          });
+        } catch (err) {
+          console.error('Failed to save private match draw:', err);
+        }
+
         const winsNeeded = Math.ceil(room.settings.totalRounds / 2);
-        if (room.state.currentRound >= room.settings.totalRounds) {
+        if (room.state.currentRound >= room.settings.totalRounds || room.state.score.host >= winsNeeded || room.state.score.guest >= winsNeeded) {
           room.state.status = 'FINISHED';
         } else {
           room.state.status = 'BETWEEN_ROUNDS';
