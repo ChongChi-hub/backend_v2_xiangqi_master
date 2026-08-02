@@ -212,3 +212,45 @@ export const uploadAvatar = async (req: AuthRequest, res: Response): Promise<voi
     res.status(500).json({ error: 'Lỗi máy chủ nội bộ' });
   }
 };
+
+export const getHistory = async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const userId = req.user?.userId;
+    if (!userId) {
+      res.status(401).json({ error: 'Không có quyền truy cập' });
+      return;
+    }
+
+    const matches = await prisma.match.findMany({
+      where: {
+        OR: [
+          { redPlayerId: userId },
+          { blackPlayerId: userId },
+        ],
+      },
+      include: {
+        redPlayer: {
+          select: { id: true, username: true, avatarUrl: true, eloScore: true },
+        },
+        blackPlayer: {
+          select: { id: true, username: true, avatarUrl: true, eloScore: true },
+        },
+        winner: {
+          select: { id: true, username: true },
+        },
+        _count: {
+          select: { moves: true },
+        },
+      },
+      orderBy: {
+        createdAt: 'desc',
+      },
+      take: 50, // Limit to 50 latest matches
+    });
+
+    res.status(200).json({ matches });
+  } catch (error) {
+    console.error('Get history error:', error);
+    res.status(500).json({ error: 'Lỗi máy chủ nội bộ' });
+  }
+};

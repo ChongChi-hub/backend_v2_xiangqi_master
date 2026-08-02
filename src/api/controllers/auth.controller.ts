@@ -76,7 +76,8 @@ export const registerUser = async (req: Request, res: Response): Promise<void> =
       data: {
         email,
         username,
-        passwordHash
+        passwordHash,
+        avatarUrl: 'https://res.cloudinary.com/znkrqbvm/image/upload/v1785675573/xiangqi_avatars/vlbrdpdmurh7mwtmqbxt.png'
       }
     });
 
