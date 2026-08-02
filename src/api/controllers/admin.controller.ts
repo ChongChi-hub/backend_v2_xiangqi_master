@@ -1,5 +1,6 @@
 import { Request, Response } from 'express';
 import prisma from '../../utils/prisma';
+import { privateRooms } from '../../sockets/room.handler';
 
 export const getDashboardStats = async (_req: Request, res: Response) => {
   try {
@@ -8,7 +9,9 @@ export const getDashboardStats = async (_req: Request, res: Response) => {
     const activeMatches = await prisma.match.count({
       where: { status: 'PLAYING' }
     });
-    const activeRooms = await prisma.room.count();
+    
+    // Get active rooms count from in-memory socket handler
+    const activeRooms = privateRooms.size;
 
     const topPlayers = await prisma.user.findMany({
       orderBy: { eloScore: 'desc' },
