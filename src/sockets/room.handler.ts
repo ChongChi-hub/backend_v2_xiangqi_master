@@ -2,7 +2,7 @@ import { Server, Socket } from 'socket.io';
 import prisma from '../utils/prisma';
 
 // In-memory queue for matchmaking
-const matchmakingQueue: Array<{ userId: string, socketId: string }> = [];
+const matchmakingQueue: Array<{ userId: string; socketId: string }> = [];
 
 export const handleRoomEvents = (io: Server, socket: Socket) => {
   const userId = socket.data.userId;
@@ -21,9 +21,9 @@ export const handleRoomEvents = (io: Server, socket: Socket) => {
 
   socket.on('find_match', async () => {
     console.log(`User ${userId} is looking for a match...`);
-    
+
     // Simple matchmaking logic
-    const existingPlayerIndex = matchmakingQueue.findIndex(p => p.userId === userId);
+    const existingPlayerIndex = matchmakingQueue.findIndex((p) => p.userId === userId);
     if (existingPlayerIndex === -1) {
       matchmakingQueue.push({ userId, socketId: socket.id });
     }
@@ -39,28 +39,39 @@ export const handleRoomEvents = (io: Server, socket: Socket) => {
             redPlayerId: player1.userId,
             blackPlayerId: player2.userId,
             timeControl: 15 * 60, // 15 minutes
-            initialFen: 'rnbakabnr/9/1c5c1/p1p1p1p1p/9/9/P1P1P1P1P/1C5C1/9/RNBAKABNR w - - 0 1'
-          }
+            initialFen: 'rnbakabnr/9/1c5c1/p1p1p1p1p/9/9/P1P1P1P1P/1C5C1/9/RNBAKABNR w - - 0 1',
+          },
         });
+
+        // Fetch usernames for both players
+        const [redUser, blackUser] = await Promise.all([
+          prisma.user.findUnique({ where: { id: player1.userId }, select: { username: true } }),
+          prisma.user.findUnique({ where: { id: player2.userId }, select: { username: true } }),
+        ]);
 
         // Notify players
         const roomId = `match_${match.id}`;
-        
-        // Use io.sockets.sockets to force both sockets to join the new room
+
         const socket1 = io.sockets.sockets.get(player1.socketId);
         const socket2 = io.sockets.sockets.get(player2.socketId);
-        
+
         if (socket1) socket1.join(roomId);
         if (socket2) socket2.join(roomId);
 
         io.to(roomId).emit('match_found', {
           matchId: match.id,
           redPlayerId: match.redPlayerId,
+          redUsername: redUser?.username || 'Kỳ Thủ Đỏ',
           blackPlayerId: match.blackPlayerId,
-          fen: match.initialFen
+          blackUsername: blackUser?.username || 'Kỳ Thủ Đen',
+          fen: match.initialFen,
         });
 
-        console.log(`Match created: ${match.id} between ${player1.userId} and ${player2.userId}`);
+        console.log(
+          `Match created: ${match.id} between ${redUser?.username || player1.userId} (Red) and ${
+            blackUser?.username || player2.userId
+          } (Black)`
+        );
       } catch (error) {
         console.error('Error creating match:', error);
       }
@@ -68,7 +79,7 @@ export const handleRoomEvents = (io: Server, socket: Socket) => {
   });
 
   socket.on('cancel_find_match', () => {
-    const index = matchmakingQueue.findIndex(p => p.userId === userId);
+    const index = matchmakingQueue.findIndex((p) => p.userId === userId);
     if (index !== -1) {
       matchmakingQueue.splice(index, 1);
       console.log(`User ${userId} cancelled matchmaking`);
