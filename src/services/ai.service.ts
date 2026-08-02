@@ -1,8 +1,46 @@
 import { spawn } from 'child_process';
 import fs from 'fs';
+import path from 'path';
+import os from 'os';
 
-const PIKAFISH_PATH = 'D:\\ThietKeHeThongTM\\Pikafish.2026-01-02\\Windows\\pikafish-avx2.exe';
-const NNUE_PATH = 'D:\\ThietKeHeThongTM\\Pikafish.2026-01-02\\pikafish.nnue';
+// Đường dẫn gốc chứa binary engines
+const ENGINES_DIR = path.join(process.cwd(), 'src', 'services', 'engines');
+
+/**
+ * Tự động chọn binary Pikafish phù hợp với OS hiện tại.
+ * Ưu tiên biến môi trường PIKAFISH_PATH nếu được cấu hình thủ công.
+ *
+ * Cấu trúc file trong src/services/engines/:
+ *   pikafish-windows-avx2.exe  → Windows (x64)
+ *   pikafish-macos-arm64        → macOS Apple Silicon (M1/M2/M3)
+ *   pikafish-macos-x64          → macOS Intel
+ *   pikafish-linux              → Linux (x64)
+ */
+const resolvePikafishPath = (): string => {
+  if (process.env.PIKAFISH_PATH) return process.env.PIKAFISH_PATH;
+
+  const platform = os.platform();   // 'win32' | 'darwin' | 'linux'
+  const arch = os.arch();           // 'arm64' | 'x64' | ...
+
+  if (platform === 'win32') {
+    return path.join(ENGINES_DIR, 'pikafish-windows-avx2.exe');
+  }
+  if (platform === 'darwin') {
+    return arch === 'arm64'
+      ? path.join(ENGINES_DIR, 'pikafish-macos-arm64')
+      : path.join(ENGINES_DIR, 'pikafish-macos-x64');
+  }
+  // linux
+  return path.join(ENGINES_DIR, 'pikafish-linux');
+};
+
+const PIKAFISH_PATH = resolvePikafishPath();
+const NNUE_PATH = process.env.NNUE_PATH || path.join(ENGINES_DIR, 'pikafish.nnue');
+
+console.log(`[AI Engine] Platform: ${os.platform()}/${os.arch()}`);
+console.log(`[AI Engine] Binary: ${PIKAFISH_PATH}`);
+console.log(`[AI Engine] NNUE:   ${NNUE_PATH}`);
+
 
 export interface AIMoveResult {
   bestMove: string;
@@ -50,6 +88,8 @@ export const calculateBestMove = async (
     let score = 0;
     let depthVisited = 0;
     let nodesVisited = 0;
+    // Bug #3 Fix: Flag ngăn Promise bị resolve nhiều lần (race condition)
+    let resolved = false;
 
     const { depth, movetime } = getDepthAndMovetime(difficulty);
 
@@ -87,6 +127,8 @@ export const calculateBestMove = async (
           }
         }
         if (trimmed.startsWith('bestmove')) {
+          if (resolved) return;
+          resolved = true;
           const parts = trimmed.split(/\s+/);
           if (parts[1]) {
             bestMove = parts[1];
@@ -104,12 +146,15 @@ export const calculateBestMove = async (
     });
 
     child.on('error', (err) => {
+      if (resolved) return;
+      resolved = true;
       console.error('Pikafish engine error:', err);
       resolve({ bestMove: 'h2e2', score: 0 });
     });
 
     setTimeout(() => {
-      if (!child.killed) {
+      if (!resolved) {
+        resolved = true;
         child.kill();
         resolve({ bestMove, score, depth: depthVisited, nodesVisited });
       }

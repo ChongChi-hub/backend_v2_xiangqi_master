@@ -2,3 +2,11 @@ node_modules/
 dist/
 .env
 .DS_Store
+
+# Pikafish Engine Binaries (download thủ công - xem SETUP.md)
+# Mỗi thành viên tự download phù hợp với OS của mình
+src/services/engines/*.exe
+src/services/engines/pikafish-macos-arm64
+src/services/engines/pikafish-macos-x64
+src/services/engines/pikafish-linux
+src/services/engines/*.nnue

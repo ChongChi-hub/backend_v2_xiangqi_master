@@ -4,10 +4,10 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "predev": "npx prisma generate && npx prisma db push --accept-data-loss",
+    "predev": "./node_modules/.bin/prisma generate && ./node_modules/.bin/prisma db push --accept-data-loss",
     "dev": "nodemon src/server.ts",
-    "build": "npx prisma generate && tsc",
-    "start": "npx prisma db push --accept-data-loss && node dist/server.js",
+    "build": "./node_modules/.bin/prisma generate && tsc",
+    "start": "./node_modules/.bin/prisma db push --accept-data-loss && node dist/server.js",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [],
@@ -15,7 +15,7 @@
   "license": "ISC",
   "type": "commonjs",
   "dependencies": {
-    "@prisma/client": "^6.19.3",
+    "@prisma/client": "6.19.3",
     "bcrypt": "^6.0.0",
     "cors": "^2.8.6",
     "dotenv": "^17.4.2",
@@ -31,7 +31,7 @@
     "@types/jsonwebtoken": "^9.0.10",
     "@types/node": "^26.1.2",
     "nodemon": "^3.1.14",
-    "prisma": "^6.19.3",
+    "prisma": "6.19.3",
     "ts-node": "^10.9.2",
     "typescript": "^5.6.3"
   }

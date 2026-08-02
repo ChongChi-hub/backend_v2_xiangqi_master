@@ -1,4 +1,5 @@
 import { Server, Socket } from 'socket.io';
+import jwt from 'jsonwebtoken';
 import { handleRoomEvents } from './room.handler';
 import { handleGameEvents } from './game.handler';
 
@@ -7,18 +8,27 @@ export const connectedUsers = new Map<string, string>();
 
 export const initSockets = (io: Server) => {
   io.use((socket, next) => {
-    // In a real app, you would verify the JWT token here
+    // Bug #2 Fix: Verify JWT token thực sự - không tin tưởng userId từ client
     const token = socket.handshake.auth.token;
-    if (token) {
-      // Decode token and get userId...
-      // For now, we'll just accept a userId directly for simplicity
-      const userId = socket.handshake.auth.userId;
-      if (userId) {
-        socket.data.userId = userId;
-        return next();
-      }
+    if (!token) {
+      return next(new Error('Authentication error: No token provided'));
     }
-    return next(new Error('Authentication error'));
+
+    const jwtSecret = process.env.JWT_SECRET;
+    if (!jwtSecret) {
+      return next(new Error('Server configuration error'));
+    }
+
+    try {
+      const decoded = jwt.verify(token, jwtSecret) as { userId: string };
+      if (!decoded.userId) {
+        return next(new Error('Authentication error: Invalid token payload'));
+      }
+      socket.data.userId = decoded.userId;
+      return next();
+    } catch {
+      return next(new Error('Authentication error: Invalid or expired token'));
+    }
   });
 
   io.on('connection', (socket: Socket) => {
