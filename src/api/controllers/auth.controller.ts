@@ -44,7 +44,8 @@ export const loginUser = async (req: Request, res: Response): Promise<void> => {
         winMatches: user.winMatches,
         loseMatches: user.loseMatches,
         drawMatches: user.drawMatches,
-        role: user.role
+        role: user.role,
+        avatarUrl: user.avatarUrl
       }
     });
   } catch (error) {
@@ -96,7 +97,8 @@ export const registerUser = async (req: Request, res: Response): Promise<void> =
         winMatches: newUser.winMatches,
         loseMatches: newUser.loseMatches,
         drawMatches: newUser.drawMatches,
-        role: newUser.role
+        role: newUser.role,
+        avatarUrl: newUser.avatarUrl
       }
     });
   } catch (error) {
