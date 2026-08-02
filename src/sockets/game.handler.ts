@@ -4,14 +4,47 @@ import prisma from '../utils/prisma';
 export const handleGameEvents = (io: Server, socket: Socket) => {
   const userId = socket.data.userId;
 
-  socket.on('make_move', async (data: { matchId: string, fen: string, moveStr: string, timeCost: number }) => {
+  socket.on('get_match_info', async (data: { matchId: string }) => {
+    try {
+      const match = await prisma.match.findUnique({
+        where: { id: data.matchId },
+      });
+
+      if (!match) return;
+
+      const [redUser, blackUser, latestMove] = await Promise.all([
+        prisma.user.findUnique({ where: { id: match.redPlayerId }, select: { username: true } }),
+        prisma.user.findUnique({ where: { id: match.blackPlayerId }, select: { username: true } }),
+        prisma.move.findFirst({
+          where: { matchId: data.matchId },
+          orderBy: { moveNumber: 'desc' },
+        }),
+      ]);
+
+      const currentFen = latestMove ? latestMove.fen : match.initialFen;
+
+      socket.emit('match_info', {
+        matchId: match.id,
+        redPlayerId: match.redPlayerId,
+        redUsername: redUser?.username || 'Kỳ thủ Đỏ',
+        blackPlayerId: match.blackPlayerId,
+        blackUsername: blackUser?.username || 'Kỳ thủ Đen',
+        fen: currentFen,
+        status: match.status,
+      });
+    } catch (error) {
+      console.error('Error fetching match info:', error);
+    }
+  });
+
+  socket.on('make_move', async (data: { matchId: string; fen: string; moveStr: string; timeCost: number }) => {
     try {
       const roomId = `match_${data.matchId}`;
-      
+
       // Save move to DB
       const match = await prisma.match.findUnique({
         where: { id: data.matchId },
-        include: { moves: true }
+        include: { moves: true },
       });
 
       if (!match || match.status !== 'PLAYING') {
@@ -32,17 +65,16 @@ export const handleGameEvents = (io: Server, socket: Socket) => {
           moveNumber: match.moves.length + 1,
           moveStr: data.moveStr,
           fen: data.fen,
-          timeCost: data.timeCost
-        }
+          timeCost: data.timeCost || 0,
+        },
       });
 
       // Broadcast move to other player in the room
       socket.to(roomId).emit('move_made', {
         playerId: userId,
         fen: data.fen,
-        moveStr: data.moveStr
+        moveStr: data.moveStr,
       });
-
     } catch (error) {
       console.error('Error handling move:', error);
     }
@@ -61,25 +93,25 @@ export const handleGameEvents = (io: Server, socket: Socket) => {
         data: {
           status: 'FINISHED',
           winnerId,
-          endedAt: new Date()
-        }
+          endedAt: new Date(),
+        },
       });
 
-      // Cập nhật ELO đơn giản (+30 cho người thắng, -30 cho người thua)
+      // ELO updates (+30 / -30)
       await prisma.user.update({
         where: { id: winnerId },
         data: {
           eloScore: { increment: 30 },
-          winMatches: { increment: 1 }
-        }
+          winMatches: { increment: 1 },
+        },
       });
 
       await prisma.user.update({
         where: { id: loserId },
         data: {
           eloScore: { decrement: 30 },
-          loseMatches: { increment: 1 }
-        }
+          loseMatches: { increment: 1 },
+        },
       });
 
       const roomId = `match_${data.matchId}`;
