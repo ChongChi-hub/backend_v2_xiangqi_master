@@ -4,8 +4,10 @@ import prisma from '../utils/prisma';
 // In-memory queue for matchmaking
 const matchmakingQueue: Array<{ userId: string; socketId: string }> = [];
 
+const INITIAL_FEN = 'rnbakabnr/9/1c5c1/p1p1p1p1p/9/9/P1P1P1P1P/1C5C1/9/RNBAKABNR w - - 0 1';
+
 // Private Rooms store
-interface PrivateRoom {
+export interface PrivateRoom {
   roomCode: string;
   hostId: string;
   hostUsername: string;
@@ -16,10 +18,29 @@ interface PrivateRoom {
     timeControl: number;
     hostSide: 'random' | 'red' | 'black';
   };
-  status: 'WAITING' | 'READY';
+  state: {
+    status: 'WAITING' | 'PLAYING' | 'BETWEEN_ROUNDS' | 'FINISHED' | 'CLOSED';
+    currentRound: number;
+    score: {
+      host: number;
+      guest: number;
+      draws: number;
+    };
+    hostReady: boolean;
+    guestReady: boolean;
+    hostAssignedSide: 'red' | 'black' | null;
+    guestAssignedSide: 'red' | 'black' | null;
+    currentFen: string;
+    turn: 'red' | 'black';
+    drawOfferBy: string | null;
+  };
   createdAt: number;
 }
 export const privateRooms = new Map<string, PrivateRoom>();
+
+export const broadcastRoomState = (io: Server, roomCode: string, room: PrivateRoom) => {
+  io.to(`room_${roomCode}`).emit('private_room_state_update', room);
+};
 
 const generateRoomCode = (): string => {
   let code: string;
@@ -59,7 +80,18 @@ export const handleRoomEvents = (io: Server, socket: Socket) => {
       guestId: null,
       guestUsername: null,
       settings,
-      status: 'WAITING',
+      state: {
+        status: 'WAITING',
+        currentRound: 1,
+        score: { host: 0, guest: 0, draws: 0 },
+        hostReady: false,
+        guestReady: false,
+        hostAssignedSide: null,
+        guestAssignedSide: null,
+        currentFen: INITIAL_FEN,
+        turn: 'red',
+        drawOfferBy: null,
+      },
       createdAt: Date.now(),
     };
     
@@ -67,6 +99,7 @@ export const handleRoomEvents = (io: Server, socket: Socket) => {
     socket.join(`room_${code}`);
     console.log(`User ${userId} created private room ${code}`);
     socket.emit('private_room_created', { roomCode: code });
+    broadcastRoomState(io, code, room);
   });
 
   socket.on('join_private_room', async (data: { roomCode: string }) => {
@@ -75,13 +108,16 @@ export const handleRoomEvents = (io: Server, socket: Socket) => {
       socket.emit('private_room_error', { message: 'Phòng không tồn tại hoặc đã bị hủy.' });
       return;
     }
-    if (room.status !== 'WAITING' || room.guestId !== null) {
-      if (room.hostId === userId || room.guestId === userId) {
-        // Rejoin
-        socket.join(`room_${data.roomCode}`);
-        socket.emit('private_room_joined', { roomCode: data.roomCode });
-        return;
-      }
+
+    if (room.hostId === userId || room.guestId === userId) {
+      // Rejoin
+      socket.join(`room_${data.roomCode}`);
+      socket.emit('private_room_joined', { roomCode: data.roomCode });
+      broadcastRoomState(io, data.roomCode, room);
+      return;
+    }
+
+    if (room.state.status !== 'WAITING' || room.guestId !== null) {
       socket.emit('private_room_error', { message: 'Phòng đã đầy hoặc đã bắt đầu.' });
       return;
     }
@@ -90,37 +126,29 @@ export const handleRoomEvents = (io: Server, socket: Socket) => {
     const guestUser = await prisma.user.findUnique({ where: { id: userId }, select: { username: true } });
     room.guestId = userId;
     room.guestUsername = guestUser?.username || 'Kỳ Thủ Khách';
-    room.status = 'READY';
-
-    socket.join(`room_${data.roomCode}`);
-    console.log(`User ${userId} joined private room ${data.roomCode}`);
-
-    // Resolve sides
+    
+    // Assign sides for first round
     let hostAssignedSide = room.settings.hostSide;
     if (hostAssignedSide === 'random') {
       hostAssignedSide = Math.random() > 0.5 ? 'red' : 'black';
     }
     const guestAssignedSide = hostAssignedSide === 'red' ? 'black' : 'red';
 
-    io.to(`room_${data.roomCode}`).emit('private_room_ready', {
-      roomCode: data.roomCode,
-      settings: room.settings,
-      host: {
-        id: room.hostId,
-        username: room.hostUsername,
-        side: hostAssignedSide,
-      },
-      guest: {
-        id: room.guestId,
-        username: room.guestUsername,
-        side: guestAssignedSide,
-      }
-    });
+    room.state.hostAssignedSide = hostAssignedSide as 'red' | 'black';
+    room.state.guestAssignedSide = guestAssignedSide as 'red' | 'black';
+    room.state.status = 'PLAYING';
+    room.state.currentFen = INITIAL_FEN;
+    room.state.turn = 'red';
+
+    socket.join(`room_${data.roomCode}`);
+    console.log(`User ${userId} joined private room ${data.roomCode}`);
+    broadcastRoomState(io, data.roomCode, room);
   });
 
   socket.on('cancel_private_room', (data: { roomCode: string }) => {
     const room = privateRooms.get(data.roomCode);
     if (room && room.hostId === userId) {
+      room.state.status = 'CLOSED';
       privateRooms.delete(data.roomCode);
       io.to(`room_${data.roomCode}`).emit('private_room_cancelled');
       console.log(`Private room ${data.roomCode} cancelled by host ${userId}`);
@@ -132,29 +160,139 @@ export const handleRoomEvents = (io: Server, socket: Socket) => {
     socket.leave(`room_${data.roomCode}`);
     if (room) {
       if (room.hostId === userId) {
-        // Host leaves, close room
-        privateRooms.delete(data.roomCode);
-        io.to(`room_${data.roomCode}`).emit('private_room_cancelled');
-        console.log(`Private room ${data.roomCode} closed because host ${userId} left`);
+        if (room.state.status === 'WAITING') {
+          room.state.status = 'CLOSED';
+          privateRooms.delete(data.roomCode);
+          io.to(`room_${data.roomCode}`).emit('private_room_cancelled');
+        } else if (room.state.status === 'PLAYING' || room.state.status === 'BETWEEN_ROUNDS') {
+          room.state.score.guest += room.settings.totalRounds; // Instantly win the series
+          room.state.status = 'FINISHED';
+          broadcastRoomState(io, data.roomCode, room);
+        }
       } else if (room.guestId === userId) {
-        // Guest leaves, room goes back to WAITING
-        room.guestId = null;
-        room.guestUsername = null;
-        room.status = 'WAITING';
-        io.to(`room_${data.roomCode}`).emit('private_room_guest_left');
-        console.log(`Guest ${userId} left private room ${data.roomCode}, back to WAITING`);
+        if (room.state.status === 'WAITING') {
+          room.guestId = null;
+          room.guestUsername = null;
+          io.to(`room_${data.roomCode}`).emit('private_room_guest_left');
+          broadcastRoomState(io, data.roomCode, room);
+        } else if (room.state.status === 'PLAYING' || room.state.status === 'BETWEEN_ROUNDS') {
+          room.state.score.host += room.settings.totalRounds; // Instantly win the series
+          room.state.status = 'FINISHED';
+          broadcastRoomState(io, data.roomCode, room);
+        }
       }
     }
   });
 
-  socket.on('private_make_move', (data: { roomCode: string; fen: string; moveStr: string }) => {
+  socket.on('private_make_move', (data: { roomCode: string; fen: string; moveStr: string; nextTurn: 'red' | 'black' }) => {
     const room = privateRooms.get(data.roomCode);
-    if (room && room.status === 'READY') {
+    if (room && room.state.status === 'PLAYING') {
+      room.state.currentFen = data.fen;
+      room.state.turn = data.nextTurn;
       socket.to(`room_${data.roomCode}`).emit('move_made', {
         playerId: userId,
         fen: data.fen,
         moveStr: data.moveStr,
       });
+      broadcastRoomState(io, data.roomCode, room); // CRITICAL: Broadcast updated state to all clients
+    }
+  });
+
+  socket.on('private_game_ended', (data: { roomCode: string; winnerId: string | null }) => {
+    const room = privateRooms.get(data.roomCode);
+    if (room && room.state.status === 'PLAYING') {
+      if (data.winnerId === room.hostId) {
+        room.state.score.host += 1;
+      } else if (data.winnerId === room.guestId) {
+        room.state.score.guest += 1;
+      } else {
+        room.state.score.draws += 1;
+      }
+
+      const winsNeeded = Math.ceil(room.settings.totalRounds / 2);
+      if (room.state.score.host >= winsNeeded || room.state.score.guest >= winsNeeded || room.state.currentRound >= room.settings.totalRounds) {
+        room.state.status = 'FINISHED';
+      } else {
+        room.state.status = 'BETWEEN_ROUNDS';
+      }
+      room.state.hostReady = false;
+      room.state.guestReady = false;
+      room.state.drawOfferBy = null;
+      broadcastRoomState(io, data.roomCode, room);
+    }
+  });
+
+  socket.on('offer_draw', (data: { roomCode: string }) => {
+    const room = privateRooms.get(data.roomCode);
+    if (room && room.state.status === 'PLAYING') {
+      room.state.drawOfferBy = userId;
+      broadcastRoomState(io, data.roomCode, room);
+    }
+  });
+
+  socket.on('respond_draw', (data: { roomCode: string; accept: boolean }) => {
+    const room = privateRooms.get(data.roomCode);
+    if (room && room.state.status === 'PLAYING' && room.state.drawOfferBy && room.state.drawOfferBy !== userId) {
+      if (data.accept) {
+        room.state.score.draws += 1;
+        const winsNeeded = Math.ceil(room.settings.totalRounds / 2);
+        if (room.state.currentRound >= room.settings.totalRounds) {
+          room.state.status = 'FINISHED';
+        } else {
+          room.state.status = 'BETWEEN_ROUNDS';
+        }
+        room.state.hostReady = false;
+        room.state.guestReady = false;
+        room.state.drawOfferBy = null;
+        broadcastRoomState(io, data.roomCode, room);
+      } else {
+        room.state.drawOfferBy = null;
+        broadcastRoomState(io, data.roomCode, room);
+      }
+    }
+  });
+
+  socket.on('resign_private_match', (data: { roomCode: string }) => {
+    const room = privateRooms.get(data.roomCode);
+    if (room && room.state.status === 'PLAYING') {
+      if (userId === room.hostId) {
+        room.state.score.guest += 1;
+      } else if (userId === room.guestId) {
+        room.state.score.host += 1;
+      }
+      
+      const winsNeeded = Math.ceil(room.settings.totalRounds / 2);
+      if (room.state.score.host >= winsNeeded || room.state.score.guest >= winsNeeded || room.state.currentRound >= room.settings.totalRounds) {
+        room.state.status = 'FINISHED';
+      } else {
+        room.state.status = 'BETWEEN_ROUNDS';
+      }
+      room.state.hostReady = false;
+      room.state.guestReady = false;
+      room.state.drawOfferBy = null;
+      broadcastRoomState(io, data.roomCode, room);
+    }
+  });
+
+  socket.on('ready_next_round', (data: { roomCode: string }) => {
+    const room = privateRooms.get(data.roomCode);
+    if (room && room.state.status === 'BETWEEN_ROUNDS') {
+      if (userId === room.hostId) room.state.hostReady = true;
+      if (userId === room.guestId) room.state.guestReady = true;
+
+      if (room.state.hostReady && room.state.guestReady) {
+        room.state.currentRound += 1;
+        room.state.status = 'PLAYING';
+        room.state.currentFen = INITIAL_FEN;
+        room.state.turn = 'red';
+        room.state.hostReady = false;
+        room.state.guestReady = false;
+        
+        const temp = room.state.hostAssignedSide;
+        room.state.hostAssignedSide = room.state.guestAssignedSide;
+        room.state.guestAssignedSide = temp;
+      }
+      broadcastRoomState(io, data.roomCode, room);
     }
   });
 
@@ -231,15 +369,24 @@ export const handleRoomEvents = (io: Server, socket: Socket) => {
 export const handlePrivateRoomDisconnect = (io: Server, userId: string) => {
   for (const [code, room] of privateRooms.entries()) {
     if (room.hostId === userId) {
-      privateRooms.delete(code);
-      io.to(`room_${code}`).emit('private_room_cancelled');
-      console.log(`Private room ${code} closed because host ${userId} disconnected`);
+      if (room.state.status === 'WAITING') {
+        room.state.status = 'CLOSED';
+        privateRooms.delete(code);
+        io.to(`room_${code}`).emit('private_room_cancelled');
+        console.log(`Private room ${code} closed because host ${userId} disconnected`);
+      } else {
+        console.log(`Host ${userId} disconnected from active private room ${code}, room preserved for reconnection`);
+      }
     } else if (room.guestId === userId) {
-      room.guestId = null;
-      room.guestUsername = null;
-      room.status = 'WAITING';
-      io.to(`room_${code}`).emit('private_room_guest_left');
-      console.log(`Guest ${userId} disconnected from private room ${code}, back to WAITING`);
+      if (room.state.status === 'WAITING') {
+        room.guestId = null;
+        room.guestUsername = null;
+        io.to(`room_${code}`).emit('private_room_guest_left');
+        broadcastRoomState(io, code, room);
+        console.log(`Guest ${userId} disconnected from WAITING private room ${code}, guest removed`);
+      } else {
+        console.log(`Guest ${userId} disconnected from active private room ${code}, room preserved for reconnection`);
+      }
     }
   }
 };
