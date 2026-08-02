@@ -23,7 +23,7 @@ const resolvePikafishPath = (): string => {
   const arch = os.arch();           // 'arm64' | 'x64' | ...
 
   if (platform === 'win32') {
-    return path.join(ENGINES_DIR, 'pikafish-windows-avx2.exe');
+    return path.join(ENGINES_DIR, 'pikafish-avx2.exe');
   }
   
   if (platform === 'darwin') {
