@@ -41,6 +41,9 @@ export const loginUser = async (req: Request, res: Response): Promise<void> => {
         username: user.username,
         email: user.email,
         eloScore: user.eloScore,
+        winMatches: user.winMatches,
+        loseMatches: user.loseMatches,
+        drawMatches: user.drawMatches,
         role: user.role
       }
     });
@@ -90,6 +93,9 @@ export const registerUser = async (req: Request, res: Response): Promise<void> =
         username: newUser.username,
         email: newUser.email,
         eloScore: newUser.eloScore,
+        winMatches: newUser.winMatches,
+        loseMatches: newUser.loseMatches,
+        drawMatches: newUser.drawMatches,
         role: newUser.role
       }
     });

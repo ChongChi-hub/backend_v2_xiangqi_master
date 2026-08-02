@@ -96,3 +96,101 @@ export const getLeaderboard = async (req: Request, res: Response): Promise<void>
     res.status(500).json({ error: 'Lỗi máy chủ nội bộ' });
   }
 };
+
+export const savePveMatch = async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const userId = req.user?.userId;
+    const { difficulty, result, playerSide, clientMatchId, timeControl, initialFen } = req.body;
+    
+    if (!userId) {
+      res.status(401).json({ error: 'Không có quyền truy cập' });
+      return;
+    }
+
+    if (!difficulty || !result || !clientMatchId || !playerSide) {
+      res.status(400).json({ error: 'Thiếu thông tin trận đấu' });
+      return;
+    }
+
+    // Determine ELO reward
+    let reward = 0;
+    if (result === 'win') {
+      switch (difficulty) {
+        case 'beginner': reward = 10; break;
+        case 'apprentice': reward = 20; break;
+        case 'intermediate': reward = 30; break;
+        case 'master': reward = 40; break;
+        case 'grandmaster': reward = 50; break;
+        default: reward = 10;
+      }
+    }
+
+    // Ensure AI user exists
+    let aiUser = await prisma.user.findUnique({ where: { username: 'Pikafish_AI' } });
+    if (!aiUser) {
+      aiUser = await prisma.user.create({
+        data: {
+          username: 'Pikafish_AI',
+          email: 'ai@pikafish.local',
+          passwordHash: 'dummy_hash',
+          eloScore: 2800,
+        }
+      });
+    }
+
+    // Prevent duplicate rewards
+    const existingMatch = await prisma.match.findUnique({ where: { id: clientMatchId } });
+    if (existingMatch) {
+      res.status(400).json({ error: 'Trận đấu đã được lưu' });
+      return;
+    }
+
+    const isRed = playerSide === 'red';
+    const winnerId = result === 'win' ? userId : result === 'lose' ? aiUser.id : null;
+
+    // Save match
+    await prisma.$transaction(async (tx) => {
+      await tx.match.create({
+        data: {
+          id: clientMatchId,
+          redPlayerId: isRed ? userId : aiUser!.id,
+          blackPlayerId: isRed ? aiUser!.id : userId,
+          winnerId,
+          status: 'FINISHED',
+          timeControl: timeControl || 0,
+          initialFen: initialFen || 'startpos',
+          endedAt: new Date(),
+        }
+      });
+
+      if (reward > 0) {
+        await tx.user.update({
+          where: { id: userId },
+          data: {
+            eloScore: { increment: reward },
+            winMatches: { increment: 1 }
+          }
+        });
+      } else if (result === 'lose') {
+        await tx.user.update({
+          where: { id: userId },
+          data: {
+            loseMatches: { increment: 1 }
+          }
+        });
+      } else if (result === 'draw') {
+        await tx.user.update({
+          where: { id: userId },
+          data: {
+            drawMatches: { increment: 1 }
+          }
+        });
+      }
+    });
+
+    res.status(200).json({ message: 'Lưu trận đấu thành công', reward });
+  } catch (error) {
+    console.error('Save PVE match error:', error);
+    res.status(500).json({ error: 'Lỗi máy chủ nội bộ' });
+  }
+};
