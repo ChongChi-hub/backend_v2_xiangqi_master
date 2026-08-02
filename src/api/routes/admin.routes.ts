@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { getDashboardStats, getUsersList, getMatchesList } from '../controllers/admin.controller';
+import { getDashboardStats, getUsersList, getMatchesList, getBotSettings, updateBotSetting } from '../controllers/admin.controller';
 import { authenticateToken, authorizeAdmin } from '../middlewares/auth.middleware';
 
 const router = Router();
@@ -10,5 +10,7 @@ router.use(authenticateToken, authorizeAdmin);
 router.get('/stats', getDashboardStats);
 router.get('/users', getUsersList);
 router.get('/matches', getMatchesList);
+router.get('/bot-settings', getBotSettings);
+router.put('/bot-settings/:difficulty', updateBotSetting);
 
 export default router;

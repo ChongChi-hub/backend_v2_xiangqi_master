@@ -116,3 +116,44 @@ export const getMatchesList = async (req: Request, res: Response) => {
     res.status(500).json({ error: 'Lỗi máy chủ nội bộ' });
   }
 };
+
+export const getBotSettings = async (req: Request, res: Response) => {
+  try {
+    const settings = await prisma.botSetting.findMany({
+      orderBy: { depth: 'asc' }
+    });
+    res.json({
+      success: true,
+      data: settings
+    });
+  } catch (error: any) {
+    console.error('Error in getBotSettings:', error);
+    res.status(500).json({ error: 'Lỗi máy chủ nội bộ' });
+  }
+};
+
+export const updateBotSetting = async (req: Request, res: Response) => {
+  try {
+    const difficulty = req.params.difficulty as string;
+    const { depth, movetime } = req.body;
+    
+    if (depth === undefined || movetime === undefined) {
+      res.status(400).json({ error: 'Thiếu tham số depth hoặc movetime' });
+      return;
+    }
+
+    const updated = await prisma.botSetting.upsert({
+      where: { difficulty },
+      update: { depth: Number(depth), movetime: Number(movetime) },
+      create: { difficulty, depth: Number(depth), movetime: Number(movetime) }
+    });
+
+    res.json({
+      success: true,
+      data: updated
+    });
+  } catch (error: any) {
+    console.error('Error in updateBotSetting:', error);
+    res.status(500).json({ error: 'Lỗi máy chủ nội bộ' });
+  }
+};

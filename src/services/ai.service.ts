@@ -77,20 +77,49 @@ export interface AIHintResult {
   explanation: string;
 }
 
-const getDepthAndMovetime = (difficulty: string = 'apprentice') => {
+// --- Database settings cache ---
+import prisma from '../utils/prisma';
+
+let botSettingsCache: Record<string, { depth: number; movetime: number }> = {};
+let lastCacheUpdate = 0;
+const CACHE_TTL = 60000; // 60 seconds
+
+const loadBotSettings = async () => {
+  try {
+    const settings = await prisma.botSetting.findMany();
+    if (settings.length > 0) {
+      settings.forEach((s: any) => {
+        botSettingsCache[s.difficulty] = { depth: s.depth, movetime: s.movetime };
+      });
+      lastCacheUpdate = Date.now();
+    }
+  } catch (err) {
+    console.error('[AI Engine] Failed to load bot settings from DB', err);
+  }
+};
+
+// Initialize cache
+loadBotSettings();
+
+const getDepthAndMovetime = async (difficulty: string = 'apprentice') => {
+  // Reload cache if expired
+  if (Date.now() - lastCacheUpdate > CACHE_TTL) {
+    await loadBotSettings();
+  }
+
+  // Use cached value if exists
+  if (botSettingsCache[difficulty]) {
+    return botSettingsCache[difficulty];
+  }
+
+  // Fallback to defaults
   switch (difficulty) {
-    case 'beginner':
-      return { depth: 2, movetime: 250 };
-    case 'apprentice':
-      return { depth: 4, movetime: 450 };
-    case 'intermediate':
-      return { depth: 7, movetime: 800 };
-    case 'master':
-      return { depth: 11, movetime: 1500 };
-    case 'grandmaster':
-      return { depth: 15, movetime: 2500 };
-    default:
-      return { depth: 4, movetime: 450 };
+    case 'beginner': return { depth: 2, movetime: 250 };
+    case 'apprentice': return { depth: 4, movetime: 450 };
+    case 'intermediate': return { depth: 7, movetime: 800 };
+    case 'master': return { depth: 11, movetime: 1500 };
+    case 'grandmaster': return { depth: 15, movetime: 2500 };
+    default: return { depth: 4, movetime: 450 };
   }
 };
 
@@ -98,6 +127,8 @@ export const calculateBestMove = async (
   fen: string,
   difficulty: string = 'apprentice'
 ): Promise<AIMoveResult> => {
+  const { depth, movetime } = await getDepthAndMovetime(difficulty);
+
   return new Promise((resolve) => {
     if (!fs.existsSync(PIKAFISH_PATH)) {
       console.warn(`Pikafish executable not found at ${PIKAFISH_PATH}, using fallback.`);
@@ -111,8 +142,6 @@ export const calculateBestMove = async (
     let nodesVisited = 0;
     // Bug #3 Fix: Flag ngăn Promise bị resolve nhiều lần (race condition)
     let resolved = false;
-
-    const { depth, movetime } = getDepthAndMovetime(difficulty);
 
     const commands = [
       'uci',
