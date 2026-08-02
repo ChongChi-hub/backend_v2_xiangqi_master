@@ -25,17 +25,38 @@ const resolvePikafishPath = (): string => {
   if (platform === 'win32') {
     return path.join(ENGINES_DIR, 'pikafish-windows-avx2.exe');
   }
+  
   if (platform === 'darwin') {
-    return arch === 'arm64'
-      ? path.join(ENGINES_DIR, 'pikafish-macos-arm64')
-      : path.join(ENGINES_DIR, 'pikafish-macos-x64');
+    const armPath = path.join(ENGINES_DIR, 'pikafish-macos-arm64');
+    const x64Path = path.join(ENGINES_DIR, 'pikafish-macos-x64');
+    
+    // Nếu Node.js là x64 (có thể do chạy qua Rosetta) nhưng file arm64 lại có sẵn
+    if (arch === 'x64' && !fs.existsSync(x64Path) && fs.existsSync(armPath)) {
+      return armPath;
+    }
+    // Nếu Node.js là arm64 nhưng file x64 lại có sẵn (có thể chạy qua Rosetta)
+    if (arch === 'arm64' && !fs.existsSync(armPath) && fs.existsSync(x64Path)) {
+      return x64Path;
+    }
+    
+    return arch === 'arm64' ? armPath : x64Path;
   }
+  
   // linux
   return path.join(ENGINES_DIR, 'pikafish-linux');
 };
 
 const PIKAFISH_PATH = resolvePikafishPath();
 const NNUE_PATH = process.env.NNUE_PATH || path.join(ENGINES_DIR, 'pikafish.nnue');
+
+// Đảm bảo file được cấp quyền thực thi trên macOS/Linux để tránh lỗi EACCES
+if (os.platform() !== 'win32' && fs.existsSync(PIKAFISH_PATH)) {
+  try {
+    fs.chmodSync(PIKAFISH_PATH, 0o755);
+  } catch (err) {
+    console.warn(`[AI Engine] Cannot set executable permission for ${PIKAFISH_PATH}`);
+  }
+}
 
 console.log(`[AI Engine] Platform: ${os.platform()}/${os.arch()}`);
 console.log(`[AI Engine] Binary: ${PIKAFISH_PATH}`);
