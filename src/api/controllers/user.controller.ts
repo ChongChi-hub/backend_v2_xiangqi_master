@@ -66,6 +66,7 @@ export const getLeaderboard = async (req: Request, res: Response): Promise<void>
         select: {
           id: true,
           username: true,
+          avatarUrl: true,
           eloScore: true,
           winMatches: true,
           loseMatches: true,
@@ -81,9 +82,13 @@ export const getLeaderboard = async (req: Request, res: Response): Promise<void>
 
       return {
         rank: skip + index + 1,
-        userId: user.id,
+        id: user.id,
         username: user.username,
+        avatarUrl: user.avatarUrl,
         eloScore: user.eloScore,
+        winMatches: user.winMatches,
+        loseMatches: user.loseMatches,
+        drawMatches: user.drawMatches,
         winRate: Math.round(winRate * 100) / 100,
       };
     });
