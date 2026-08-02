@@ -1,14 +1,13 @@
 import { Server, Socket } from 'socket.io';
 import jwt from 'jsonwebtoken';
 import { handleRoomEvents } from './room.handler';
-import { handleGameEvents } from './game.handler';
+import { handleGameEvents, handlePlayerDisconnect } from './game.handler';
 
 // Store connected users mapping (socket.id -> userId)
 export const connectedUsers = new Map<string, string>();
 
 export const initSockets = (io: Server) => {
   io.use((socket, next) => {
-    // Bug #2 Fix: Verify JWT token thực sự - không tin tưởng userId từ client
     const token = socket.handshake.auth.token;
     if (!token) {
       return next(new Error('Authentication error: No token provided'));
@@ -42,7 +41,8 @@ export const initSockets = (io: Server) => {
 
     socket.on('disconnect', () => {
       connectedUsers.delete(socket.id);
-      console.log(`User ${userId} disconnected`);
+      console.log(`User ${userId} disconnected. Triggering active match cleanup...`);
+      handlePlayerDisconnect(io, userId);
     });
   });
 };

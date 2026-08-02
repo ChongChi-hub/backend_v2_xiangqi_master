@@ -83,7 +83,7 @@ export const handleGameEvents = (io: Server, socket: Socket) => {
   socket.on('resign', async (data: { matchId: string }) => {
     try {
       const match = await prisma.match.findUnique({ where: { id: data.matchId } });
-      if (!match) return;
+      if (!match || match.status !== 'PLAYING') return;
 
       const winnerId = match.redPlayerId === userId ? match.blackPlayerId : match.redPlayerId;
       const loserId = userId;
@@ -120,4 +120,50 @@ export const handleGameEvents = (io: Server, socket: Socket) => {
       console.error('Error handling resign:', error);
     }
   });
+};
+
+export const handlePlayerDisconnect = async (io: Server, userId: string) => {
+  try {
+    const activeMatches = await prisma.match.findMany({
+      where: {
+        status: 'PLAYING',
+        OR: [{ redPlayerId: userId }, { blackPlayerId: userId }],
+      },
+    });
+
+    for (const match of activeMatches) {
+      const winnerId = match.redPlayerId === userId ? match.blackPlayerId : match.redPlayerId;
+      const loserId = userId;
+
+      await prisma.match.update({
+        where: { id: match.id },
+        data: {
+          status: 'FINISHED',
+          winnerId,
+          endedAt: new Date(),
+        },
+      });
+
+      await prisma.user.update({
+        where: { id: winnerId },
+        data: {
+          eloScore: { increment: 30 },
+          winMatches: { increment: 1 },
+        },
+      });
+
+      await prisma.user.update({
+        where: { id: loserId },
+        data: {
+          eloScore: { decrement: 30 },
+          loseMatches: { increment: 1 },
+        },
+      });
+
+      const roomId = `match_${match.id}`;
+      io.to(roomId).emit('match_ended', { winnerId, reason: 'opponent_left' });
+    }
+  } catch (error) {
+    console.error('Error handling player disconnect match cleanup:', error);
+  }
 };
