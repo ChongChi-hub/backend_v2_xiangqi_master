@@ -23,7 +23,7 @@ const resolvePikafishPath = (): string => {
   const arch = os.arch();           // 'arm64' | 'x64' | ...
 
   if (platform === 'win32') {
-    const localWinPath = path.join(ENGINES_DIR, 'pikafish-avx2.exe');
+    const localWinPath = path.join(ENGINES_DIR, 'pikafish-windows-avx2.exe');
     if (fs.existsSync(localWinPath)) return localWinPath;
     const globalWinPath = 'D:\\ThietKeHeThongTM\\Pikafish.2026-01-02\\Windows\\pikafish-avx2.exe';
     if (fs.existsSync(globalWinPath)) return globalWinPath;
