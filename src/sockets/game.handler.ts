@@ -213,6 +213,89 @@ export const handleGameEvents = (io: Server, socket: Socket) => {
       console.error('Error handling respond_draw:', error);
     }
   });
+
+  socket.on('request_undo', async (data: { matchId: string }) => {
+    try {
+      const roomId = `match_${data.matchId}`;
+      const match = await prisma.match.findUnique({ where: { id: data.matchId }, include: { moves: true } });
+      if (!match || match.status !== 'PLAYING') return;
+
+      // Only allow undo if there is at least one move
+      if (match.moves.length === 0) return;
+
+      socket.to(roomId).emit('undo_requested', { requestedBy: userId });
+    } catch (error) {
+      console.error('Error handling request_undo:', error);
+    }
+  });
+
+  socket.on('respond_undo', async (data: { matchId: string; accept: boolean }) => {
+    try {
+      const roomId = `match_${data.matchId}`;
+      
+      if (!data.accept) {
+        socket.to(roomId).emit('undo_declined', { declinedBy: userId });
+        return;
+      }
+
+      // Undo Accepted
+      const match = await prisma.match.findUnique({ 
+        where: { id: data.matchId },
+        include: { 
+          moves: { orderBy: { moveNumber: 'desc' }, take: 2 } 
+        }
+      });
+      if (!match || match.status !== 'PLAYING') return;
+      if (match.moves.length === 0) return;
+
+      // Determine how many moves to delete based on the last move's player
+      const lastMove = match.moves[0];
+      
+      // If the last move was made by the opponent (who is accepting the undo), delete 2 moves.
+      // If the last move was made by the requester (who is asking for undo), delete 1 move.
+      // The user responding is the opponent, so userId = opponent.
+      const isOpponentsTurnToUndo = lastMove.playerId === userId;
+      const deleteCount = isOpponentsTurnToUndo ? 1 : 2; // Wait, if last move was userId (opponent), they just moved, so we delete 1 move (their move)?
+      // Actually, if I (A) made a move, and B hasn't moved yet. I ask for undo. B accepts. The last move is A's. A wants to take back their move. Delete 1.
+      // If A made a move, and B made a move. A asks for undo (maybe wants to undo their blunder). B accepts. We need to delete B's move and A's move. So delete 2.
+      // In both cases, we delete moves until it is A's turn again.
+      // So if lastMove is B's (the one responding), delete 2 moves.
+      // If lastMove is A's (the requester), delete 1 move.
+      // So if lastMove.playerId === userId, it means B (responder) made the last move. Delete 2 moves.
+      const movesToDelete = lastMove.playerId === userId ? 2 : 1;
+
+      // Find moves to delete
+      const movesToDrop = await prisma.move.findMany({
+        where: { matchId: data.matchId },
+        orderBy: { moveNumber: 'desc' },
+        take: movesToDelete,
+      });
+
+      const moveIdsToDrop = movesToDrop.map(m => m.id);
+
+      await prisma.move.deleteMany({
+        where: { id: { in: moveIdsToDrop } }
+      });
+
+      // Get the new latest FEN
+      const newLatestMove = await prisma.move.findFirst({
+        where: { matchId: data.matchId },
+        orderBy: { moveNumber: 'desc' }
+      });
+
+      const newFen = newLatestMove ? newLatestMove.fen : match.initialFen;
+
+      // Broadcast undo accepted to both players
+      io.to(roomId).emit('undo_accepted', { 
+        deletedCount: movesToDelete, 
+        fen: newFen,
+        acceptedBy: userId 
+      });
+
+    } catch (error) {
+      console.error('Error handling respond_undo:', error);
+    }
+  });
 };
 
 export const handlePlayerDisconnect = async (io: Server, userId: string) => {
